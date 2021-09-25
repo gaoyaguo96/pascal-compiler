@@ -1,0 +1,33 @@
+Program ::= PROGRAM Variable SEMI Block DOT
+
+Block::= VarDeclarationBlock? ProcedureDeclarationBlock* CompoundStatement
+
+VarDeclarationBlock ::= VAR VarDeclarationLines
+
+ProcedureDeclarationBlock ::= PROCEDURE Variable SEMI Block SEMI
+
+VarDeclarationLines ::= VarDeclarationLine+
+
+VarDeclarationLine ::= VarTypeDecl SEMI
+
+VarTypeDecl::= ID (COMMA ID)* COLON TypeSpec
+
+TypeSpec::= INTEGER | REAL
+
+CompoundStatement ::= BEGIN StatementList END
+
+StatementList ::= Statement SEMI StatementList | Statement
+
+Statement ::= assignment_statement | CompoundStatement | empty
+
+assignment_statement ::= Variable ASSIGN Expr
+
+empty ::=
+
+Expr ::= Term((PLUS|MINUS)Term)*
+
+Term ::= Factor((MUL|INTEGER_DIV|FLOAT_DIV)Factor)*
+
+Factor ::= (PLUS|MINUS)Factor | INTEGER_CONST | REAL_CONST | LPAREN Expr RPAREN | Variable
+
+Variable ::= ID
