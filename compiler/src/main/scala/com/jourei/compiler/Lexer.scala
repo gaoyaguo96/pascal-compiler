@@ -2,127 +2,253 @@ package com.jourei.compiler
 
 import cats.data.State
 import cats.implicits.catsSyntaxOptionId
-import com.jourei.compiler.OptionOps.{ >>=, flatMap }
+import cats.mtl.syntax.raise.*
+import cats.mtl.syntax.state.*
+import cats.mtl.{ Raise, Stateful }
+import cats.syntax.applicative.*
+import cats.syntax.apply.*
+import cats.syntax.bifunctor.*
+import cats.syntax.flatMap.*
+import cats.syntax.foldable.*
+import cats.syntax.functor.*
+import cats.{ Applicative, FlatMap, Foldable, Functor, Id, Monad }
+import com.jourei.compiler.LexerStates.Position
+import com.jourei.compiler.data.Token.{ toIDToken, toKeywordTokenOrIDToken }
+import com.jourei.compiler.data.error.{ LexerError, PositionInSource }
+import com.jourei.compiler.data.{ LocatedToken, Token }
+import com.jourei.compiler.syntax.OptionOps.{ >>=, flatMap }
+import com.jourei.compiler.typeclass.AboutError
 
 import scala.annotation.tailrec
 import scala.util.chaining.*
 
 object Lexer:
   private type Tokens = List[Token]
+  private type LocatedTokens = Seq[LocatedToken]
 
-  def doLexicalAnalysis(s: String): Option[Tokens] =
-    @tailrec
-    def go(s: Chars)(tokens: Tokens): Option[Tokens] =
-      def getNumber(c: Char)(s: Chars): (Token, Chars) =
+  type StatefulPosition[F[_]] = Stateful[F, Position]
+
+  def doLexicalAnalysis[F[_]: Monad: StatefulPosition](s: String)(
+      using Raise[F, LexerError]): F[LocatedTokens] =
+    // TODO tailrec
+    def go[F[_]: Monad: StatefulPosition](
+        s: Chars,
+        locatedTokens: LocatedTokens)(
+        using Raise[F, LexerError]): F[LocatedTokens] =
+      inline def getNumber(inline c: Char, inline s: Chars): F[(Token, Chars)] =
         type NumberStr = Chars
-        @tailrec
-        def go(acc: Chars)(float: Boolean)(
-            s: Chars): (NumberStr, Boolean, Chars) =
-          s match
-            case c :: s if c.isDigit => go(c :: acc)(float)(s)
-            case (c0 @ '.') :: c1 :: s if !float && c1.isDigit =>
-              go(c1 :: c0 :: acc)(true)(s)
-            case _ => (acc.reverse, float, s)
 
-        go(List(c))(false)(s) match
-          case (n, isReal, s) =>
-            val numberStr = n.mkString
-            (
-              if isReal then Token.RealConst(numberStr.toFloat)
-              else Token.IntegerConst(numberStr.toInt),
-              s)
+        // TODO tailrec
+        def go[F[_]: StatefulPosition: Applicative](
+            acc: Chars,
+            float: Boolean,
+            s: Chars): F[(NumberStr, Boolean, Chars)] =
+          s match
+            case c :: s if c.isDigit =>
+              LexerStates.processS(1) *> go(c :: acc, float, s)
+            case (c0 @ '.') :: c1 :: s if !float && c1.isDigit =>
+              LexerStates.processS(2) *> go(c1 :: c0 :: acc, true, s)
+            case _ => (acc.reverse, float, s).pure
+
+        for
+          (n, isReal, s) <- go(List(c), false, s)
+          numberStr = n.mkString
+        yield (
+          if isReal then Token.RealConst(numberStr.toFloat)
+          else Token.IntegerConst(numberStr.toInt),
+          s)
       end getNumber
 
-      def peek(beginning: String)(s: Chars): Boolean =
+      inline def peek(inline beginning: String)(inline s: Chars): Boolean =
         @tailrec
         def beginWith(beginning: Chars)(s: Chars): Boolean =
           (beginning, s) match
             case (Nil, _)                            => true
             case (first :: cs, c :: s) if first == c => beginWith(cs)(s)
             case _                                   => false
+
         beginWith(beginning.toList)(s)
+      end peek
 
-      @tailrec
-      def loopGetString(s: Chars)(acc: Chars): (Chars, Chars) =
+//      @tailrec
+      def loopGetWord[F[_]: Monad: StatefulPosition](
+          s: Chars,
+          acc: Chars): F[(Chars, Chars)] =
         s match
-          case c :: s if c.isLetterOrDigit => loopGetString(s)(c.toUpper :: acc)
-          case _                           => (s, acc)
+          case c :: s if c.isLetterOrDigit =>
+            // TODO build a tail recursion
+            LexerStates.processS(1) *> loopGetWord(s, c.toUpper :: acc)
+          case _ => LexerStates.processS(1) *> (acc, s).pure
 
-      def toID(s: String): Token = Token.ID(s)
+      inline def getWordWith[F[_]: Monad: StatefulPosition](
+          inline f: String => Token)(
+          inline init: Char,
+          inline s: Chars): F[(Token, Chars)] =
+        loopGetWord(s, List(init.toUpper))
+          .map(_.leftMap(_.reverse.mkString.pipe(f)))
 
-      def getNameWith(f: String => Token)(init: Char)(
-          s: Chars): (Token, Chars) =
-        loopGetString(s)(List(init.toUpper)) match
-          case (s, acc) => (f(acc.reverse.mkString), s)
+      inline def getID[F[_]: Monad: StatefulPosition](
+          inline init: Char,
+          inline s: Chars): F[(Token, Chars)] =
+        getWordWith(_.toIDToken)(init, s)
 
-      def getID(init: Char)(s: Chars): (Token, Chars) =
-        getNameWith(toID)(init)(s)
+      inline def getIDOrReservedKeyword[F[_]: Monad: StatefulPosition](
+          inline init: Char,
+          inline s: Chars): F[(Token, Chars)] =
+        getWordWith(_.toKeywordTokenOrIDToken)(init, s)
 
-      def getIDOrReservedKeyword(init: Char)(s: Chars): (Token, Chars) =
-        def toToken(s: String): Token =
-          def toKeyword(s: String): Option[Token] =
-            s match
-              case "BEGIN"     => Token.Begin.some
-              case "END"       => Token.End.some
-              case "DIV"       => Token.IntegerDiv.some
-              case "PROGRAM"   => Token.Program.some
-              case "PROCEDURE" => Token.Procedure.some
-              case "VAR"       => Token.Var.some
-              case "INTEGER"   => Token.Integer.some
-              case "REAL"      => Token.Real.some
-              case _           => Option.empty
-          end toKeyword
+      inline def getAndGo[F[_]: Monad: StatefulPosition, A](
+          inline f: (A, Chars) => F[(Token, Chars)])(lineNo: Int, column: Int)(
+          inline init: A,
+          inline remain: Chars)(locatedTokens: LocatedTokens)(
+          using Raise[F, LexerError]): F[LocatedTokens] =
+        for
+          (token, cs) <- f(init, remain)
+          locatedTokens <- go(
+            cs,
+            LocatedToken(
+              token,
+              PositionInSource(lineNo, column)) +: locatedTokens)
+        yield locatedTokens
 
-          toKeyword(s).getOrElse(toID(s))
-        end toToken
+      inline def buildLocatedToken(
+          inline token: Token,
+          inline lineNo: Int,
+          inline column: Int): LocatedToken =
+        LocatedToken(token, PositionInSource(lineNo, column))
 
-        getNameWith(toToken)(init)(s)
-      end getIDOrReservedKeyword
+      for {
+        Position(lineNo, column) <- Stateful.get
+        newLocatedTokens <-
+          s match {
+            case Nil =>
+              (LocatedToken(
+                Token.EOF,
+                PositionInSource(lineNo, column)) +: locatedTokens).pure
+            case c :: s if c == '\n' || c == '\r' =>
+              LexerStates.wrapS *> go(
+                if peek("\n")(s) then s.tail else s,
+                locatedTokens)
+            case c :: s if c.isSpaceChar =>
+              LexerStates.processS(1) *> go(s, locatedTokens)
+            case c :: s if c.isDigit =>
+              getAndGo(getNumber(_, _))(lineNo, column)(c, s)(locatedTokens)
+            case '+' :: s =>
+              LexerStates.processS(1) *> go(
+                s,
+                buildLocatedToken(Token.Plus, lineNo, column) +: locatedTokens)
+            case '-' :: s =>
+              LexerStates.processS(1) *> go(
+                s,
+                buildLocatedToken(Token.Minus, lineNo, column) +: locatedTokens)
+            case '*' :: s =>
+              LexerStates.processS(1) *> go(
+                s,
+                buildLocatedToken(Token.Mul, lineNo, column) +: locatedTokens)
+            case '/' :: s =>
+              LexerStates.processS(1) *> go(
+                s,
+                buildLocatedToken(
+                  Token.FloatDiv,
+                  lineNo,
+                  column) +: locatedTokens)
+            case '(' :: s =>
+              LexerStates.processS(1) *>
+                go(
+                  s,
+                  buildLocatedToken(
+                    Token.LParen,
+                    lineNo,
+                    column) +: locatedTokens)
+            case ')' :: s =>
+              LexerStates.processS(1) *> go(
+                s,
+                buildLocatedToken(
+                  Token.RParen,
+                  lineNo,
+                  column) +: locatedTokens)
+            case ':' :: s if peek("=")(s) =>
+              LexerStates.processS(2) *> go(
+                s.tail,
+                buildLocatedToken(
+                  Token.Assign,
+                  lineNo,
+                  column) +: locatedTokens)
+            case ':' :: s =>
+              LexerStates.processS(1) *> go(
+                s,
+                buildLocatedToken(Token.Colon, lineNo, column) +: locatedTokens)
+            case ';' :: s =>
+              LexerStates.processS(1) *> go(
+                s,
+                buildLocatedToken(Token.Semi, lineNo, column) +: locatedTokens)
+            case '.' :: s =>
+              LexerStates.processS(1) *> go(
+                s,
+                buildLocatedToken(Token.Dot, lineNo, column) +: locatedTokens)
+            case ',' :: s =>
+              LexerStates.processS(1) *> go(
+                s,
+                buildLocatedToken(Token.Comma, lineNo, column) +: locatedTokens)
+            case (c @ '_') :: s =>
+              getAndGo(getID(_, _))(lineNo, column)(c, s)(locatedTokens)
+            case c :: s if c.isLetter =>
+              getAndGo(getIDOrReservedKeyword(_, _))(lineNo, column)(c, s)(
+                locatedTokens)
+            case '{' :: s =>
+//              @tailrec
+              def skipComment[F[_]: Monad: StatefulPosition](s: Chars)(
+                  using Raise[F, LexerError]): F[Chars] =
+                LexerStates.processS(1) *> (if s.isEmpty then
+                                              Stateful.get.flatMap {
+                                                case Position(lineNo, column) =>
+                                                  LexerError(
+                                                    "}",
+                                                    PositionInSource(
+                                                      lineNo,
+                                                      column)).raise
+                                              }
+                                            else if '}' == s.head then
+                                              s.tail.pure
+                                            else skipComment(s.tail))
 
-      inline def getAndGoWith[A](f: A => Chars => (Token, Chars))(init: A)(
-          remain: Chars): Option[Tokens] =
-        f(init)(remain) match
-          case (token, cs) => go(cs)(token :: tokens)
-
-      s match
-        case Nil => Some(Token.EOF :: tokens)
-        case c :: s if c.isSpaceChar || c == '\n' || c == '\r' => go(s)(tokens)
-        case c :: s if c.isDigit => getAndGoWith(getNumber)(c)(s)
-        case '+' :: s            => go(s)(Token.Plus :: tokens)
-        case '-' :: s            => go(s)(Token.Minus :: tokens)
-        case '*' :: s            => go(s)(Token.Mul :: tokens)
-        case '/' :: s            => go(s)(Token.FloatDiv :: tokens)
-        case '(' :: s            => go(s)(Token.LParen :: tokens)
-        case ')' :: s            => go(s)(Token.RParen :: tokens)
-        case ':' :: s if peek("=")(s) =>
-          go(s.tail)(Token.Assign :: tokens)
-        case ':' :: s             => go(s)(Token.Colon :: tokens)
-        case ';' :: s             => go(s)(Token.Semi :: tokens)
-        case '.' :: s             => go(s)(Token.Dot :: tokens)
-        case ',' :: s             => go(s)(Token.Comma :: tokens)
-        case (c @ '_') :: s       => getAndGoWith(getID)(c)(s)
-        case c :: s if c.isLetter => getAndGoWith(getIDOrReservedKeyword)(c)(s)
-        case '{' :: s =>
-          @tailrec
-          def skipComment(s: Chars): Option[Chars] =
-            s match
-              case Nil    => Option.empty
-              case c :: s => if c == '}' then Some(s) else skipComment(s)
-
-          skipComment(s) >>= (go(_)(tokens))
-        case _ => Option.empty
-      end match
+              skipComment(s) >>= (go(_, locatedTokens))
+            case c :: _ =>
+              LexerError(s"$c", PositionInSource(lineNo, column)).raise
+          }
+      } yield newLocatedTokens
     end go
 
-    go(s.toList)(List.empty).map(_.reverse)
+    go(s.toList, List.empty).map(_.reverse)
   end doLexicalAnalysis
 
   private type Chars = List[Char]
 end Lexer
 
-enum Token:
-  case Program, Var, Procedure, Colon, Comma, Integer, Real, Plus, Minus, Mul,
-  IntegerDiv, FloatDiv, LParen, RParen, EOF, Begin, End, Dot, Assign, Semi
-  case IntegerConst(v: Int)
-  case RealConst(v: Float)
-  case ID(v: String)
+object LexerStates:
+
+  final case class Position(lineNo: Int, column: Int)
+
+  private def wrap(s: Position): Position = Position(s.lineNo + 1, 1)
+  private def process(length: Int)(s: Position): Position =
+    if length < 0 then throw IllegalArgumentException()
+    s.copy(column = s.column + length)
+
+  def wrapS[F[_]](using Stateful[F, Position]): F[Unit] = wrap.modify
+  def processS[F[_]](step: Int)(using Stateful[F, Position]): F[Unit] =
+    process(step).modify
+
+  final case class Tokens(v: Seq[Token]) extends AnyVal
+
+  private def prependToken(token: Token)(s: Tokens): Tokens =
+    Tokens(s.v.prepended(token))
+
+  private def prependAllTokens(tokens: Token*)(s: Tokens): Tokens =
+    Tokens(s.v.prependedAll(tokens))
+
+  def prependTokenS[F[_]](token: Token)(using Stateful[F, Tokens]): F[Unit] =
+    prependToken(token).modify
+
+  def prependAllTokensS[F[_]](tokens: Token*)(
+      using Stateful[F, Tokens]): F[Unit] =
+    prependAllTokens(tokens*).modify

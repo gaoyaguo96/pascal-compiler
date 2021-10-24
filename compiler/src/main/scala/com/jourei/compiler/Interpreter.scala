@@ -5,91 +5,40 @@ import cats.instances.either.*
 import cats.instances.map.*
 import cats.syntax.foldable.*
 import cats.syntax.traverse.*
-import cats.syntax.unorderedTraverse.*
+import com.jourei.compiler.data.LStack
 import com.jourei.compiler.data.AST.*
 import com.jourei.compiler.data.AST.Expr.{ BOp, UOp }
 import com.jourei.compiler.data.Numeric.*
 import com.jourei.compiler.data.{
-  BuiltinType,
   BuiltinTypeSymbol,
   Numeric,
-  VType,
+  ScopedSymbolTable,
   VarSymbol,
   VarSymbolTable
 }
 
 import scala.util.Try
+import scala.util.chaining.*
 
 object Interpreter {
   type ErrorOr[A] = Either[String, A]
   type GlobalMemory = Map[String, Numeric]
-  type BuiltinTypeSymbolTable = Set[BuiltinTypeSymbol]
 
-  inline def interpret(program: Program): ErrorOr[GlobalMemory] =
-    interpretBlock(program.block)
+  inline def interpret(program: Program): ErrorOr[GlobalMemory] = ???
 
-  private inline def interpretProcedure(
-      procedure: Procedure): ErrorOr[GlobalMemory] =
-    interpretBlock(procedure.block)
+//  private inline def interpretProcedure(procedure: Procedure)(
+//      varSymbolTableStack: LStack[VarSymbolTable]): ErrorOr[GlobalMemory] =
+//    for {
+//      uppermostScope <- varSymbolTableStack.headOption.toRight(
+//        "There is no scope")
+//
+//    } yield interpretBlock(procedure.name)(procedure.block)
 
-  def interpretBlock(block: Block): ErrorOr[GlobalMemory] = {
-    extension (typeDefs: TypeDefs) {
-      def toVarSymbolTable(builtinTypeSymbolTable: BuiltinTypeSymbolTable)
-          : ErrorOr[VarSymbolTable] = {
-        def doOnce(builtinTypeSymbolTable: BuiltinTypeSymbolTable)(
-            variable: Var,
-            typeSpec: TypeSpec): ErrorOr[(String, VType)] = {
-          def toVType(typeSpec: TypeSpec)(
-              builtinTypeSymbolTable: BuiltinTypeSymbolTable)
-              : ErrorOr[VType] = {
-            def checkTypeSpecWithSymbolTable(typeSpec: TypeSpec)(
-                builtinTypeSymbolTable: BuiltinTypeSymbolTable)
-                : ErrorOr[TypeSpec] = {
-              def isInSymbolTable(typeSpec: TypeSpec)(
-                  builtinTypeSymbolTable: BuiltinTypeSymbolTable): Boolean = {
-                inline def toBuiltinTypeSymbol(
-                    typeSpec: TypeSpec): BuiltinTypeSymbol =
-                  BuiltinTypeSymbol(typeSpec match
-                    case TypeSpec.Real    => BuiltinType.Real
-                    case TypeSpec.Integer => BuiltinType.Integer
-                  )
+  type VarSymbolTableStack = LStack[VarSymbolTable]
+  private def interpretBlock(name: String)(
+      block: Block)(varSymbolTableStack:LStack[VarSymbolTable]): ErrorOr[GlobalMemory] = ???
 
-                builtinTypeSymbolTable contains toBuiltinTypeSymbol(typeSpec)
-              }
-
-              Either.cond(
-                isInSymbolTable(typeSpec)(builtinTypeSymbolTable),
-                typeSpec,
-                s"invalid type \"$typeSpec\"")
-            }
-
-            checkTypeSpecWithSymbolTable(typeSpec)(builtinTypeSymbolTable).map {
-              case TypeSpec.Real    => VType.Builtin(BuiltinType.Real)
-              case TypeSpec.Integer => VType.Builtin(BuiltinType.Integer)
-            }
-          }
-
-          for vType <- toVType(typeSpec)(builtinTypeSymbolTable)
-          yield (variable.toStr, vType)
-        }
-
-        typeDefs.toMap.toList
-          .traverse(doOnce(builtinTypeSymbolTable))
-          .map(VarSymbolTable.fromTupleSeq)
-      }
-    }
-
-    inline def initBuiltinTypeTable(): BuiltinTypeSymbolTable =
-      Set(
-        BuiltinTypeSymbol(BuiltinType.Real),
-        BuiltinTypeSymbol(BuiltinType.Integer))
-
-    block.typedefs
-      .toVarSymbolTable(initBuiltinTypeTable())
-      .flatMap(interpretCompound(block.compound)(Map.empty)(_))
-  }
-
-  def interpretCompound(compound: Compound)(globalMemory: GlobalMemory)(
+  private def interpretCompound(compound: Compound)(globalMemory: GlobalMemory)(
       varSymbolTable: VarSymbolTable): ErrorOr[GlobalMemory] = {
     def interpretStatements(statements: Seq[Statement])(
         globalMemory: GlobalMemory): ErrorOr[GlobalMemory] = {
@@ -134,28 +83,31 @@ object Interpreter {
               }
 
             def bindVariable(id: String)(n: Numeric)(
-                varSymbolTable: VarSymbolTable): ErrorOr[(String, Numeric)] =
-              varSymbolTable.get(id) match {
-                case None => s"Variable $id has not been declared".asLeft
-                case Some(VarSymbol(name, vType)) =>
-                  inline def haveRightType(n: Numeric)(vType: VType): Boolean =
-                    vType match {
-                      case VType.Builtin(BuiltinType.Integer) => n.isInt
-                      case _                                  => n.isFloat
-                    }
-                  inline def matchType(id: String)(n: Numeric)(
-                      vType: VType): ErrorOr[(String, Numeric)] =
-                    Either.cond(
-                      haveRightType(n)(vType),
-                      (id, n),
-                      s"The type of $id is incorrect")
-
-                  matchType(id)(n)(vType)
-              }
+                varSymbolTable: VarSymbolTable): ErrorOr[(String, Numeric)] = ???
+//              varSymbolTable.get(id) match {
+//                case None => s"Variable $id has not been declared".asLeft
+//                case Some(VarSymbol(name, vType)) =>
+//                  inline def haveRightType(n: Numeric)(vType: String): Boolean =
+////                    vType match {
+////                      case "INTEGER" => n.isInt
+////                      case "REAL"                                        => n.isFloat
+////                      case _ => false
+////                    }
+//                    ???
+//
+//                  inline def matchType(id: String)(n: Numeric)(
+//                      vType: String): ErrorOr[(String, Numeric)] =
+//                    Either.cond(
+//                      haveRightType(n)(vType),
+//                      (id, n),
+//                      s"The type of $id is incorrect")
+//
+//                  matchType(id)(n)(vType)
+//              }
 
             for {
               n <- interpret(expr)(globalMemory)(varSymbolTable)
-              boundVariable <- bindVariable(variable.toStr)(n)(varSymbolTable)
+              boundVariable <- bindVariable(variable.name)(n)(varSymbolTable)
             } yield globalMemory + boundVariable
           case Statement.InnerCompound(compound) =>
             interpretCompound(compound)(globalMemory)(varSymbolTable)
@@ -166,6 +118,6 @@ object Interpreter {
         interpretStatement(statement)(symbolTable)(varSymbolTable))
     }
 
-    interpretStatements(compound.v)(globalMemory)
+    interpretStatements(compound.statements)(globalMemory)
   }
 }

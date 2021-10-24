@@ -4,7 +4,13 @@ Block::= VarDeclarationBlock? ProcedureDeclarationBlock* CompoundStatement
 
 VarDeclarationBlock ::= VAR VarDeclarationLines
 
-ProcedureDeclarationBlock ::= PROCEDURE Variable SEMI Block SEMI
+ProcedureDeclarationBlock ::= PROCEDURE Variable EnclosedFormalParameters? SEMI Block SEMI
+
+EnclosedFormalParameters ::= LPAREN FormalParameterList RPAREN
+
+FormalParameterList ::= FormalParameter | FormalParameter SEMI FormalParameterList
+
+FormalParameter ::= VarTypeDecl
 
 VarDeclarationLines ::= VarDeclarationLine+
 
