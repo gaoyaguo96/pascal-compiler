@@ -16,7 +16,6 @@ import com.jourei.compiler.data.error.{ LexerError, PositionInSource }
 import com.jourei.compiler.data.{ LocatedToken, Token }
 import com.jourei.compiler.lexer.LexerStates.Position
 import com.jourei.compiler.syntax.OptionOps.{ >>=, flatMap }
-import com.jourei.compiler.typeclass.AboutError
 
 import scala.annotation.tailrec
 import scala.util.chaining.*
