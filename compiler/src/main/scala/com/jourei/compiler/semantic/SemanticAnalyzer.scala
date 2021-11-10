@@ -1,52 +1,35 @@
-package com.jourei.compiler
+package com.jourei.compiler.semantic
 
-import cats.data.{Kleisli, ReaderT, WriterT}
-import cats.instances.option
-import cats.mtl.{Raise, Tell}
+import cats.data.{ Kleisli, ReaderT, WriterT }
+import cats.mtl.Raise
 import cats.syntax.applicative.*
 import cats.syntax.applicativeError.*
-import cats.syntax.apply.*
-import cats.syntax.either.*
 import cats.syntax.flatMap.*
 import cats.syntax.foldable.*
 import cats.syntax.functor.*
 import cats.syntax.semigroupk.*
-import cats.syntax.traverse.*
-import cats.{Applicative, ApplicativeError, MonadError, Show}
-import com.jourei.compiler.Interpreter.{ErrorOr, VarSymbolTableStack}
+import cats.{ Applicative, ApplicativeError, MonadError }
 import com.jourei.compiler.data.*
 import com.jourei.compiler.data.AST.*
 
 import scala.annotation.tailrec
-import scala.collection.immutable.Queue
 
 object SemanticAnalyzer {
+  type ErrorOr[A] = Either[String, A]
   type ErrorOrWritable[A] = WriterT[ErrorOr, String, A]
   type WriterStringT[F[_], A] = WriterT[F, String, A]
 
   type MonadErrorString[F[_]] = MonadError[F, String]
   type ApplicativeErrorString[F[_]] = ApplicativeError[F, String]
 
-  type ErrorableWriter[E,A] = WriterT[[a]=>>Either[E,a],String,A]
+  type ErrorableWriter[E, A] = WriterT[[a] =>> Either[E, a], String, A]
 
-//  def analyzeProgram[F[_]: FlatMap, L](program: Program)(using Tell[F, L])(
-//      using MonadError[F, String]): F[Unit] =
-//    inline def globalScope =
-//      ScopedSymbolTable(
-//        "global",
-//        initBuiltinTypeSymbolTable(),
-//        List.empty,
-//        List.empty)
-//
-//    for {
-//      _ <- write(showProgramLine(program.name))
-//      _ <- analyzeBlock(program.block)(program.name)(
-//        initBuiltinTypeSymbolTable())(List.empty)(LStack(globalScope))
-//        .tell(". " + showEndOfScopeSegment(program.name))
-//    } yield ()
-//  end analyzeProgram
-
-  def analyzeProgram[E:Show](program: Program): ErrorOrWritable[Unit] = {
+  /** 对AST进行语义分析
+   *  @param program
+   *    AST根
+   *  @return
+   */
+  def analyzeProgram(program: Program): ErrorOrWritable[Unit] = {
     inline def globalScope =
       ScopedSymbolTable(
         "global",
@@ -157,7 +140,7 @@ object SemanticAnalyzer {
           )
         end remaining
 
-        firstTime(typeName) <+> remaining(typeName: String)
+        firstTime(typeName).combineK(remaining(typeName: String))
       end findLeveledTypeInfo
 
       def containsVarDef(varName: String)(
@@ -297,8 +280,8 @@ object SemanticAnalyzer {
    *  @return
    *    变量符号表
    */
-  private def guaranteeNonRepeatabilityAndBuildVarSymbolTable[F[_]: MonadErrorString](
-      varDecls: VarDecls)(
+  private def guaranteeNonRepeatabilityAndBuildVarSymbolTable[
+      F[_]: MonadErrorString](varDecls: VarDecls)(
       builtinTypeSymbolTable: BuiltinTypeSymbolTable): F[VarSymbolTable] = {
     def doOnce[F[_]: MonadErrorString](
         builtinTypeSymbolTable: BuiltinTypeSymbolTable)(variable: ID)(

@@ -19,43 +19,19 @@ import com.jourei.compiler.data.{ LocatedToken, Token }
 
 import scala.annotation.tailrec
 import scala.util.chaining.*
+import cats.data.OptionTMonad
+import cats.Eval
 
 object Parser:
   private type LocatedTokensStateT[F[_]] = [a] =>> StateT[F, LocatedTokens, a]
 
-  sealed abstract private class IndexedStateTMonad[F[_], S]
-      extends Monad[[a] =>> IndexedStateT[F, S, S, a]] {
-    implicit def F: Monad[F]
-
-    def pure[A](a: A): IndexedStateT[F, S, S, A] =
-      IndexedStateT.pure(a)
-
-    def flatMap[A, B](fa: IndexedStateT[F, S, S, A])(
-        f: A => IndexedStateT[F, S, S, B]): IndexedStateT[F, S, S, B] =
-      fa.flatMap(f)
-
-    def tailRecM[A, B](a: A)(f: A => IndexedStateT[F, S, S, Either[A, B]])
-        : IndexedStateT[F, S, S, B] =
-      IndexedStateT[F, S, S, B](s =>
-        F.tailRecM[(S, A), (S, B)]((s, a)) { case (s, a) =>
-          F.map(f(a).run(s)) { case (s, ab) =>
-            ab match {
-              case Right(b) => Right((s, b))
-              case Left(a)  => Left((s, a))
-            }
-          }
-        })
-  }
-
-  implicit def catsDataMonadForIndexedStateT[F[_], S](
-      implicit F0: Monad[F]): Monad[[a] =>> IndexedStateT[F, S, S, a]] =
-    new IndexedStateTMonad[F, S] { implicit def F = F0 }
-
-
   final def parse[F[_]: Monad: HandleParserError](
       locatedTokens: LocatedTokens): F[Program] =
-    implicit class PSHMC[F[_]: Monad,S,E](using Stateful[F,S])(using Handle[F,E])
-      extends Monad[F] with Stateful[F,S] with Handle[F,E]:
+    implicit class PSHMC[F[_]: Monad, S, E](using Stateful[F, S])(
+        using Handle[F, E])
+        extends Monad[F]
+        with Stateful[F, S]
+        with Handle[F, E]:
       def flatMap[A, B](fa: F[A])(f: A => F[B]): F[B] = Monad[F].flatMap(fa)(f)
       def pure[A](x: A): F[A] = Monad[F].pure(x)
       def tailRecM[A, B](a: A)(f: A => F[Either[A, B]]): F[B] =
@@ -65,14 +41,11 @@ object Parser:
       def set(s: S): F[Unit] = Stateful.set(s)
       def applicative: Applicative[F] = Monad[F]
       def handleWith[A](fa: F[A])(f: E => F[A]): F[A] =
-        summon[Handle[F,E]].handleWith(fa)(f)
-      def raise[E2 <: E, A](e: E2): F[A] = summon[Handle[F,E]].raise(e)
+        summon[Handle[F, E]].handleWith(fa)(f)
+      def raise[E2 <: E, A](e: E2): F[A] = summon[Handle[F, E]].raise(e)
     end PSHMC
 
-    StateT
-      .pure[F, LocatedTokens, Unit](())
-      .*>(program)
-      .runA(locatedTokens)
+    program[[a] =>> StateT[F, LocatedTokens, a]].runA(locatedTokens)
   end parse
 
   type LocatedTokens = Seq[LocatedToken]
@@ -243,7 +216,7 @@ object Parser:
                     end factor
 
                     def term: F[Expr] =
-                      def doCyclically: F[Expr => Expr] = {
+                      def doCyclically: F[Expr => Expr] = 
                         type IncompleteExpr = Expr => Expr
                         identity[Expr].tailRecM[F, Expr => Expr] {
                           previousIncompleteExpr =>
@@ -257,8 +230,7 @@ object Parser:
                                 locatedTokens <- Stateful.get
                                 incompleteExpr <-
                                   if locatedTokens.isEmpty then
-                                    ParserError.UnexpectedEOF
-                                      .raise[F, IncompleteExpr]
+                                    ParserError.UnexpectedEOF.raise
                                   else
                                     extension (inline token: Token)
                                       inline def toBOp(
@@ -280,14 +252,11 @@ object Parser:
 
                             once.attemptHandle.map {
                               _.fold(
-                                Function.const(previousIncompleteExpr.asRight),
-                                incompleteExpr =>
-                                  previousIncompleteExpr
-                                    .andThen(incompleteExpr)
-                                    .asLeft)
+                                _ => previousIncompleteExpr.asRight,
+                                previousIncompleteExpr.andThen(_).asLeft)
                             }
                         }
-                      }
+                      end doCyclically
 
                       for
                         expr <- factor

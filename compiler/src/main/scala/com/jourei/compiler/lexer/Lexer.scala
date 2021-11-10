@@ -1,7 +1,7 @@
-package com.jourei.compiler
+package com.jourei.compiler.lexer
 
+import cats.*
 import cats.data.State
-import cats.implicits.catsSyntaxOptionId
 import cats.mtl.syntax.raise.*
 import cats.mtl.syntax.state.*
 import cats.mtl.{ Raise, Stateful }
@@ -11,11 +11,10 @@ import cats.syntax.bifunctor.*
 import cats.syntax.flatMap.*
 import cats.syntax.foldable.*
 import cats.syntax.functor.*
-import cats.{ Applicative, FlatMap, Foldable, Functor, Id, Monad }
-import com.jourei.compiler.LexerStates.Position
 import com.jourei.compiler.data.Token.{ toIDToken, toKeywordTokenOrIDToken }
 import com.jourei.compiler.data.error.{ LexerError, PositionInSource }
 import com.jourei.compiler.data.{ LocatedToken, Token }
+import com.jourei.compiler.lexer.LexerStates.Position
 import com.jourei.compiler.syntax.OptionOps.{ >>=, flatMap }
 import com.jourei.compiler.typeclass.AboutError
 

@@ -1,7 +1,7 @@
 lazy val versions = new {
   val cats = "2.6.1"
-  val zioPrelude = "1.0.0-RC6"
-  val zio = "2.0.0-M3"
+  val zioPrelude = "1.0.0-RC7"
+  val zio = "2.0.0-M4"
   val spire = "0.17.0"
   val monocle = "3.1.0"
   val catsMTL = "1.2.1"
@@ -13,7 +13,7 @@ lazy val versions = new {
   val hikariCP = "4.0.3"
   val postgresql = "42.2.20"
   val logbackClassic = "1.2.3"
-  val scalatest = "3.2.9"
+  val scalatest = "3.2.10"
   val scalatestScalaCheck = "3.2.9.0"
 }
 lazy val dependencies = new {
@@ -21,9 +21,10 @@ lazy val dependencies = new {
   val zioPrelude = "dev.zio" %% "zio-prelude" % versions.zioPrelude
   val cats = "org.typelevel" %% "cats-core" % versions.cats
   val spire = "org.typelevel" %% "spire" % versions.spire
-  val shapeless3 = "org.typelevel" %% "shapeless3-deriving" % versions.shapeless3
+  val shapeless3 =
+    "org.typelevel" %% "shapeless3-deriving" % versions.shapeless3
   val catsMTL = "org.typelevel" %% "cats-mtl" % versions.catsMTL
-  val catsLaws =  "org.typelevel" %% "cats-laws" % versions.cats
+  val catsLaws = "org.typelevel" %% "cats-laws" % versions.cats
   val catsEffect = "org.typelevel" %% "cats-effect" % versions.catsEffect
   val monocleCore =
     "dev.optics" %% "monocle-core" % versions.monocle
@@ -42,8 +43,6 @@ lazy val dependencies = new {
   val logbackClassic =
     "ch.qos.logback" % "logback-classic" % versions.logbackClassic
   val scalatest = "org.scalatest" %% "scalatest" % versions.scalatest
-  val scalatestScalaCheck =
-    "org.scalatestplus" %% "scalacheck-1-15" % versions.scalatestScalaCheck
   val akkaPersistenceTestkit =
     "com.typesafe.akka" %% "akka-persistence-testkit" % versions.akka
 }
@@ -51,14 +50,13 @@ lazy val dependencies = new {
 lazy val commonLibraryDependencies =
   Seq(
     dependencies.cats withSources () withJavadoc (),
-    dependencies.monocleCore withSources() withJavadoc(),
+    dependencies.monocleCore withSources () withJavadoc (),
     dependencies.catsMTL withSources () withJavadoc (),
     dependencies.shapeless3 withSources () withJavadoc (),
     dependencies.monocleCore withSources () withJavadoc (),
     dependencies.monocleMacro withSources () withJavadoc (),
-    dependencies.catsLaws %Test withSources () withJavadoc (),
-    dependencies.scalatest % Test withSources (),
-    dependencies.scalatestScalaCheck %Test withSources ())
+    dependencies.catsLaws % Test withSources () withJavadoc (),
+    dependencies.scalatest % Test withSources ())
 
 lazy val compiler =
   (project in file("compiler")).settings(
@@ -74,3 +72,4 @@ ThisBuild / version := "0.0.1"
 ThisBuild / scalaVersion := "3.1.0"
 ThisBuild / scalacOptions ++= Seq("-source:future")
 ThisBuild / autoCompilerPlugins := true
+
